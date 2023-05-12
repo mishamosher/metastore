@@ -50,6 +50,8 @@ static struct metasettings settings = {
 	.do_removeemptydirs = false,
 	.do_git = false,
 	.git_only = false,
+	.restrict_to_fs = 0,
+	.device_id = 0,
 };
 
 /* Used to create lists of dirs / other files which are missing in the fs */
@@ -463,6 +465,7 @@ usage(const char *arg0, const char *message)
 "  -E, --remove-empty-dirs  Remove extra empty directories\n"
 "  -g, --git                Do not omit .git directories\n"
 "  -G, --git-only           Only process files tracked by git\n"
+"      --one-file-system    Stay within the root folder's file system\n"
 "  -f, --file=FILE          Set metadata file (" METAFILE " by default)\n"
 	    );
 
@@ -484,6 +487,7 @@ static struct option long_options[] = {
 	{ "remove-empty-dirs", no_argument,       NULL, 'E' },
 	{ "git",               no_argument,       NULL, 'g' },
 	{ "git-only",          no_argument,       NULL, 'G' },
+	{ "one-file-system",   no_argument,       &settings.restrict_to_fs, (int)CommandLineOption_RestrictFS },
 	{ "file",              required_argument, NULL, 'f' },
 	{ NULL, 0, NULL, 0 }
 };
@@ -521,7 +525,9 @@ main(int argc, char **argv)
 		case 'g': /* git */               settings.do_git = true;        break;
 		case 'f': /* file */              settings.metafile = optarg;    break;
 		case 'G': /* git-only*/	          settings.git_only = true;      break;
+		case   0: /* flag set */          break;
 		default:
+			printf("%d %d\n", c, settings.restrict_to_fs);
 			usage(argv[0], "unknown option");
 		}
 	}
@@ -601,7 +607,7 @@ main(int argc, char **argv)
 						dir_list[dir_count++] = curr_dir;
 					else
 						free(curr_dir);
-					
+
 					curr_dir = dirname(new_dir);
 				}
 			}

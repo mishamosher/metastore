@@ -324,7 +324,7 @@ normalize_path(const char *orig)
 	char *result;
 	size_t cwdlen;
 
-	result = getcwd(cwd, PATH_MAX);
+	getcwd(cwd, PATH_MAX);
 	if (!real)
 		return NULL;
 
@@ -363,6 +363,10 @@ mentries_recurse(const char *path, struct metahash *mhash, msettings *st)
 		    path, strerror(errno));
 		return;
 	}
+	if ((st->restrict_to_fs == (int)CommandLineOption_RestrictFS)
+	    && (st->device_id != (unsigned long long int)sbuf.st_dev)) {
+		return;
+	}
 
 	mentry = mentry_create(path);
 	if (!mentry)
@@ -395,9 +399,20 @@ mentries_recurse(const char *path, struct metahash *mhash, msettings *st)
 
 /* Recurses opath and adds metadata entries to the metaentry list */
 void
-mentries_recurse_path(const char *opath, struct metahash **mhash, msettings *st)
+mentries_recurse_path(const char *opath, struct metahash **mhash, struct metasettings *st)
 {
+	struct stat sbuf;
 	char *path = normalize_path(opath);
+	if (!path)
+		return;
+	if (st->restrict_to_fs == (int)CommandLineOption_RestrictFS) {
+		if (lstat(path, &sbuf)) {
+			msg(MSG_ERROR, "lstat failed for %s: %s\n",
+			    path, strerror(errno));
+			return;
+		}
+		st->device_id = (unsigned long long int)sbuf.st_dev;
+	}
 
 	if (!(*mhash))
 		*mhash = mhash_alloc();
@@ -437,7 +452,7 @@ mentries_tofile(const struct metahash *mhash, const char *path)
 	FILE *to;
 	const struct metaentry *mentry;
 	int key;
-	unsigned i;
+	unsigned i, j;
 
 	to = fopen(path, "w");
 	if (!to) {
@@ -448,22 +463,25 @@ mentries_tofile(const struct metahash *mhash, const char *path)
 
 	write_binary_string(SIGNATURE, SIGNATURELEN, to);
 	write_binary_string(VERSION, VERSIONLEN, to);
+	write_binary_string("\n", 1, to);
 
 	for (key = 0; key < HASH_INDEXES; key++) {
 		for (mentry = mhash->bucket[key]; mentry; mentry = mentry->next) {
 			write_string(mentry->path, to);
 			write_string(mentry->owner, to);
 			write_string(mentry->group, to);
-			write_int((uint64_t)mentry->mtime, 8, to);
-			write_int((uint64_t)mentry->mtimensec, 8, to);
-			write_int((uint64_t)mentry->mode, 2, to);
-			write_int(mentry->xattrs, 4, to);
+			write_int((uint64_t)mentry->mtime, to);
+			write_int((uint64_t)mentry->mtimensec, to);
+			write_int((uint64_t)mentry->mode, to);
+			write_int(mentry->xattrs, to);
 			for (i = 0; i < mentry->xattrs; i++) {
 				write_string(mentry->xattr_names[i], to);
-				write_int(mentry->xattr_lvalues[i], 4, to);
-				write_binary_string(mentry->xattr_values[i],
-				                    mentry->xattr_lvalues[i], to);
+				write_int(mentry->xattr_lvalues[i], to);
+				for (j = 0; j < mentry->xattr_lvalues[i]; j++) {
+					write_int((uint64_t)((unsigned char)mentry->xattr_values[i][j]), to);
+				}
 			}
+			write_binary_string("\n", 1, to);
 		}
 	}
 
@@ -480,7 +498,7 @@ mentries_fromfile(struct metahash **mhash, const char *path)
 	char *max;
 	int fd;
 	struct stat sbuf;
-	unsigned i;
+	unsigned i, j;
 
 	if (!(*mhash))
 		*mhash = mhash_alloc();
@@ -524,6 +542,7 @@ mentries_fromfile(struct metahash **mhash, const char *path)
 		goto out;
 	}
 	ptr += VERSIONLEN;
+	ptr += strlen("\n");
 
 	while (ptr < mmapstart + sbuf.st_size) {
 		if (*ptr == '\0') {
@@ -537,13 +556,14 @@ mentries_fromfile(struct metahash **mhash, const char *path)
 		mentry->pathlen = strlen(mentry->path);
 		mentry->owner = read_string(&ptr, max);
 		mentry->group = read_string(&ptr, max);
-		mentry->mtime = (time_t)read_int(&ptr, 8, max);
-		mentry->mtimensec = (time_t)read_int(&ptr, 8, max);
-		mentry->mode = (mode_t)read_int(&ptr, 2, max);
-		mentry->xattrs = (unsigned)read_int(&ptr, 4, max);
+		mentry->mtime = (time_t)read_int(&ptr, max);
+		mentry->mtimensec = (time_t)read_int(&ptr, max);
+		mentry->mode = (mode_t)read_int(&ptr, max);
+		mentry->xattrs = (unsigned)read_int(&ptr, max);
 
 		if (!mentry->xattrs) {
 			mentry_insert(mentry, *mhash);
+			ptr += strlen("\n");
 			continue;
 		}
 
@@ -553,14 +573,14 @@ mentries_fromfile(struct metahash **mhash, const char *path)
 
 		for (i = 0; i < mentry->xattrs; i++) {
 			mentry->xattr_names[i] = read_string(&ptr, max);
-			mentry->xattr_lvalues[i] = (int)read_int(&ptr, 4, max);
-			mentry->xattr_values[i] = read_binary_string(
-			                           &ptr,
-			                           mentry->xattr_lvalues[i],
-			                           max
-			                          );
+			mentry->xattr_lvalues[i] = (int)read_int(&ptr, max);
+			mentry->xattr_values[i] = xmalloc(mentry->xattr_lvalues[i]);
+			for (j = 0; j < mentry->xattr_lvalues[i]; j++) {
+				mentry->xattr_values[i][j] = (char) read_int(&ptr, max);
+			}
 		}
 		mentry_insert(mentry, *mhash);
+		ptr += strlen("\n");
 	}
 
 out:
