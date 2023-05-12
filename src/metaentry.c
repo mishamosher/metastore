@@ -324,7 +324,7 @@ normalize_path(const char *orig)
 	char *result;
 	size_t cwdlen;
 
-	getcwd(cwd, PATH_MAX);
+	result = getcwd(cwd, PATH_MAX);
 	if (!real)
 		return NULL;
 
@@ -403,6 +403,31 @@ mentries_recurse_path(const char *opath, struct metahash **mhash, msettings *st)
 		*mhash = mhash_alloc();
 	mentries_recurse(path, *mhash, st);
 	free(path);
+}
+
+/* From a list of files (paths), adds respective metadata entries */
+void mentries_from_file_list(char **file_list,
+                             struct metahash **mhash, size_t count)
+{
+        struct stat sbuf;
+        struct metaentry *mentry;
+
+        if (!(*mhash))
+                *mhash = mhash_alloc();
+
+
+	for (size_t i=0; i<count; i++) {
+		if (lstat(file_list[i], &sbuf)) {
+			msg(MSG_ERROR, "lstat failed for %s: %s\n",
+			    file_list[i], strerror(errno));
+			return;
+		}
+		mentry = mentry_create(file_list[i]);
+	        if (!mentry)
+			return;
+
+		mentry_insert(mentry, *mhash);
+	}
 }
 
 /* Stores metaentries to a file */
