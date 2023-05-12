@@ -10,6 +10,8 @@ Makefile.dep
 
 /bin/
 
+/debian/
+
 *~
 *.patch
 
@@ -19,3 +21,6 @@ Makefile.dep
 *.includes
 
 /.idea/
+
+.kdev4/
+*.kdev4
